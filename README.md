@@ -18,3 +18,9 @@ quantizable). Best on small objects / logos / watermarks; large-region removal
 can leave a faint ghost, and per-frame video removal of a *moving* object
 flickers (static object / locked-off shot = fill-once-and-hold is clean).
 Requirements: macOS 26 / iOS 26, Swift 6.2.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
+
+Bundled or downloaded models keep their own licences; see the notes above where a model is named.
