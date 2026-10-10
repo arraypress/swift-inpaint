@@ -76,6 +76,13 @@ bench and beach behind them intact); a boxed one takes what the box takes —
 the bench under the man went with him, and at 31% of the frame his box left
 the dark ghost measured above at that size, with the warning printed.
 
+**A phrase, on real photographs.** "TAKEAWAY" out of a chalkboard café sign
+(CC BY-SA, Commons): matched alone — the board's other lines kept — and filled
+cleanly at 2% of the frame. "ROXHAM" out of a close-up street sign: matched
+without the "RD" beside it, but it is 25% of that frame, the warning fired, and
+the fill smeared and took a strip of the sign's border with it — the size
+limit, not the matching.
+
 ## The model
 
 LaMa (Big-LaMa weights, Apache-2.0) as Core ML: `jerhoads/lama-coreml` on Hugging
