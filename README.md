@@ -53,9 +53,28 @@ that compiles and loads the model.
 **The person detector, alone, sees people in text.** `GeneratePersonInstanceMaskRequest`
 returned a "person" covering 15% of a card with nothing on it but two lines of
 type, at an observation confidence of 1.0 (not a per-person score). Erasing it
-would have taken the caption. An outline is now kept only where
-`DetectHumanRectanglesRequest` also finds a body at 0.3 or more. **Not yet
-measured on real photographs of people.**
+would have taken the caption. An outline is kept only where
+`DetectHumanRectanglesRequest` also finds a body at 0.3 or more.
+
+**…and misses people in photographs.** Thirteen Wikimedia Commons photos (CC0,
+CC BY, CC BY-SA — people on benches, walking, from above, a long exposure, two
+statues, and signs and landscapes as controls), `.people` only:
+
+| | outline-and-witness (0.1.0) | + whole-body witness and boxes |
+|---|---|---|
+| Photos with real people found (of 7) | 2 | **5** |
+| Missed | a man filling a third of the frame, a seated reader, a street of walkers, a tiny figure from above, a long-exposure ghost | the tiny figure and the ghost; 1 of ~5 walkers in the street found |
+| Signs, landscape, a second statue (5 controls) | none found | none found |
+| A bronze statue of a man | erased | erased — both detectors are sure (0.71) |
+
+The outline request drew nothing at all for three of the seven, including the
+man on the bench; the body detector found him at 0.70. And its default looks
+for upper bodies only: the seated reader scored 0.21 that way, 0.41 asked for
+whole bodies. So both are asked, and a confident body with no outline is
+erased as a box padded 8%. **By eye:** an outlined person comes out cleanly (the
+bench and beach behind them intact); a boxed one takes what the box takes —
+the bench under the man went with him, and at 31% of the frame his box left
+the dark ghost measured above at that size, with the warning printed.
 
 ## The model
 

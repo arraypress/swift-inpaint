@@ -67,14 +67,23 @@ public enum RegionFinder {
     /// with this detector and floors it at 0.3.
     public static let minimumPersonConfidence: Float = 0.3
 
-    /// Every person in the image, as one mask by their outlines.
+    /// Every person in the image, as one mask: by their outlines where Vision
+    /// can draw one, by a padded box where it can only say a body is there.
     ///
-    /// An outline is kept only where the body detector also finds a person.
-    /// MEASURED: the instance-mask request, run alone on a card bearing
-    /// nothing but two lines of text, returned a "person" covering 15% of
-    /// it with an observation confidence of 1.0 — that number is not a
-    /// per-person score — and erasing it would have taken the caption.
-    /// The body detector reports a real confidence, so it is the witness.
+    /// Two requests, because neither is enough alone. MEASURED:
+    ///
+    /// - The outline request, alone, found a "person" covering 15% of a card
+    ///   bearing nothing but two lines of text (observation confidence 1.0,
+    ///   which is not a per-person score). So an outline is kept only where
+    ///   the body detector — which does give a real confidence — agrees.
+    /// - On thirteen Wikimedia Commons photographs, the outline request drew
+    ///   NOTHING for three with people in them, one a man filling a third of
+    ///   the frame on a bench; the body detector found him at 0.70. So a body
+    ///   with no outline is erased as a box, which costs more invented
+    ///   background but leaves no one behind.
+    /// - The body detector's default looks for upper bodies only; one seated
+    ///   reader scored 0.21 that way and 0.41 asked for whole bodies. Both are
+    ///   asked, and the higher answer counts.
     ///
     /// - Parameter image: The image to read.
     /// - Returns: The mask at the image's size and one region per person,
@@ -82,20 +91,18 @@ public enum RegionFinder {
     /// - Throws: ``InpaintError/analysisFailed(_:)`` and
     ///   ``InpaintError/renderFailed(_:)``.
     public static func people(in image: CGImage) async throws -> (mask: CGImage, regions: [FoundRegion])? {
+        let size = CGSize(width: image.width, height: image.height)
         let observation: InstanceMaskObservation?
+        var bodies: [CGRect] = []
         do {
             observation = try await GeneratePersonInstanceMaskRequest().perform(on: image)
-        } catch {
-            throw InpaintError.analysisFailed(error.localizedDescription)
-        }
-        guard let observation, !observation.allInstances.isEmpty else { return nil }
-
-        let size = CGSize(width: image.width, height: image.height)
-        let bodies: [CGRect]
-        do {
-            bodies = try await DetectHumanRectanglesRequest().perform(on: image)
-                .filter { $0.confidence >= minimumPersonConfidence }
-                .map { $0.boundingBox.toImageCoordinates(size, origin: .upperLeft) }
+            var whole = DetectHumanRectanglesRequest()
+            whole.upperBodyOnly = false
+            for request in [DetectHumanRectanglesRequest(), whole] {
+                bodies += try await request.perform(on: image)
+                    .filter { $0.confidence >= minimumPersonConfidence }
+                    .map { $0.boundingBox.toImageCoordinates(size, origin: .upperLeft) }
+            }
         } catch {
             throw InpaintError.analysisFailed(error.localizedDescription)
         }
@@ -103,10 +110,11 @@ public enum RegionFinder {
 
         var masks: [CGImage] = []
         var regions: [FoundRegion] = []
-        for instance in observation.allInstances {
+        var outlines: [CGRect] = []
+        for instance in observation?.allInstances ?? IndexSet() {
             let buffer: CVPixelBuffer
             do {
-                buffer = try observation.generateMask(for: IndexSet(integer: instance))
+                buffer = try observation!.generateMask(for: IndexSet(integer: instance))
             } catch {
                 throw InpaintError.analysisFailed(error.localizedDescription)
             }
@@ -114,7 +122,15 @@ public enum RegionFinder {
             guard let bounds = MaskBuilder.contentBounds(of: mask),
                   bodies.contains(where: { $0.intersects(bounds) }) else { continue }
             masks.append(mask)
+            outlines.append(bounds)
             regions.append(FoundRegion(kind: .person, rect: bounds))
+        }
+
+        let boxes = PersonBoxes.unoutlined(bodies, outlines: outlines)
+            .map { PersonBoxes.padded($0, in: size) }
+        if !boxes.isEmpty {
+            masks.append(try MaskBuilder.mask(size: size, rects: boxes))
+            regions += boxes.map { FoundRegion(kind: .person, rect: $0) }
         }
         guard !masks.isEmpty else { return nil }
         return (try MaskBuilder.union(masks, size: size), regions)

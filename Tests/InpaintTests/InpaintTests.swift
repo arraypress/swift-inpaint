@@ -150,6 +150,45 @@ struct FinderTests {
     }
 }
 
+@Suite("People Vision only half sees")
+struct PersonBoxTests {
+
+    @Test("A body an outline already covers needs no box")
+    func covered() {
+        let body = CGRect(x: 100, y: 100, width: 50, height: 120)
+        #expect(PersonBoxes.unoutlined([body], outlines: [body.insetBy(dx: -5, dy: -5)]).isEmpty)
+    }
+
+    @Test("A body with no outline becomes a box")
+    func uncovered() {
+        let body = CGRect(x: 100, y: 100, width: 50, height: 120)
+        #expect(PersonBoxes.unoutlined([body], outlines: [CGRect(x: 400, y: 100, width: 50, height: 120)]) == [body])
+    }
+
+    @Test("Upper-body and whole-body answers for one person are one box")
+    func merged() {
+        let whole = CGRect(x: 100, y: 100, width: 60, height: 160)
+        let upper = CGRect(x: 104, y: 100, width: 52, height: 70)
+        let boxes = PersonBoxes.unoutlined([upper, whole], outlines: [])
+        #expect(boxes == [whole.union(upper)])
+    }
+
+    @Test("Two people side by side stay two boxes")
+    func apart() {
+        let boxes = PersonBoxes.unoutlined([CGRect(x: 0, y: 0, width: 40, height: 100),
+                                            CGRect(x: 60, y: 0, width: 40, height: 100)], outlines: [])
+        #expect(boxes.count == 2)
+    }
+
+    @Test("A box grows a little and stays inside the image")
+    func padding() {
+        let padded = PersonBoxes.padded(CGRect(x: 0, y: 50, width: 100, height: 100), in: CGSize(width: 300, height: 300))
+        #expect(padded.minX == 0, "clipped at the edge")
+        #expect(padded.minY == 42)
+        #expect(padded.width == 108)
+    }
+}
+
 @Suite("The model", .enabled(if: ProcessInfo.processInfo.environment["INPAINT_MODEL"] != nil))
 struct ModelTests {
 
