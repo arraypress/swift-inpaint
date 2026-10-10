@@ -4,7 +4,11 @@
 //
 //  Created by David Sherlock on 2026.
 //
+//  The model, and the one call that runs it. Everything about WHERE it runs
+//  is ``RegionPlanner``'s; everything about WHAT it removes is the mask's.
+//
 
+import CoreGraphics
 import CoreImage
 import CoreML
 import Foundation
@@ -19,11 +23,41 @@ public final class LaMaInpainter: @unchecked Sendable {
     private let model: MLModel
     private let ciContext = CIContext()
 
+    /// Loads the model, compiling an `.mlpackage` once and caching it.
+    ///
+    /// - Parameter modelURL: The `.mlpackage`, `.mlmodel` or `.mlmodelc`.
+    /// - Throws: Core ML's error when the file is not a model it can load.
     public init(modelURL: URL) throws {
         let url = try Self.compiledURL(for: modelURL, cacheFolder: "swift-inpaint")
         let config = MLModelConfiguration()
         config.computeUnits = .all
         self.model = try MLModel(contentsOf: url, configuration: config)
+    }
+
+    /// Removes what a mask marks from an image and fills it in.
+    ///
+    /// - Parameters:
+    ///   - image: The picture.
+    ///   - mask: White where something goes, the picture's size.
+    ///   - feather: How many pixels to soften the seam over.
+    /// - Returns: The picture, changed only where the mask is.
+    /// - Throws: ``InpaintError/maskSizeMismatch(mask:image:)``,
+    ///   ``InpaintError/emptyMask``, ``InpaintError/predictionFailed(_:)``
+    ///   or ``InpaintError/renderFailed(_:)``.
+    public func erase(_ image: CGImage, mask: CGImage, feather: CGFloat = 2) throws -> CGImage {
+        let size = CGSize(width: image.width, height: image.height)
+        guard mask.width == image.width, mask.height == image.height else {
+            throw InpaintError.maskSizeMismatch(mask: CGSize(width: mask.width, height: mask.height), image: size)
+        }
+        guard MaskBuilder.contentBounds(of: mask) != nil else { throw InpaintError.emptyMask }
+        guard let result = inpaint(CIImage(cgImage: image), mask: CIImage(cgImage: mask), feather: feather) else {
+            throw InpaintError.predictionFailed("no output for a \(image.width)×\(image.height) image")
+        }
+        let space = image.colorSpace?.model == .rgb ? image.colorSpace! : CGColorSpace(name: CGColorSpace.sRGB)!
+        guard let rendered = ciContext.createCGImage(result, from: result.extent, format: .RGBA8, colorSpace: space) else {
+            throw InpaintError.renderFailed("the filled image")
+        }
+        return rendered
     }
 
 
@@ -61,21 +95,9 @@ public final class LaMaInpainter: @unchecked Sendable {
         let mask = mask.cropped(to: extent)
         let N = Self.side
 
-        // Region around the mask content: bounds + 35% context margin, at
-        // least 320px per side, aiming square for aspect fidelity — but NEVER
-        // smaller than the content (a forced square that couldn't contain a
-        // tall mask left parts of it unfilled). The region must always cover
-        // the mask; mild non-squareness is fine.
+        // The window around the mask's content; the rules are RegionPlanner's.
         let content = maskContentBounds(mask) ?? extent
-        let want = max(max(content.width, content.height) * 1.7, 320)
-        let w = min(max(want, content.width * 1.1), extent.width)
-        let h = min(max(want, content.height * 1.1), extent.height)
-        var region = CGRect(x: content.midX - w / 2, y: content.midY - h / 2, width: w, height: h)
-        if region.minX < extent.minX { region.origin.x = extent.minX }
-        if region.minY < extent.minY { region.origin.y = extent.minY }
-        if region.maxX > extent.maxX { region.origin.x = extent.maxX - w }
-        if region.maxY > extent.maxY { region.origin.y = extent.maxY - h }
-        region = region.intersection(extent).union(content.intersection(extent))
+        let region = RegionPlanner.window(around: content, in: extent)
 
         guard let imageBuffer = pixelBuffer(from: image.cropped(to: region), side: N, format: kCVPixelFormatType_32BGRA),
               let maskBuffer = pixelBuffer(from: mask.cropped(to: region), side: N, format: kCVPixelFormatType_OneComponent8)
